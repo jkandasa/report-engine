@@ -8,10 +8,13 @@ import java.awt.Rectangle;
 import java.awt.Robot;
 import java.awt.Toolkit;
 import java.awt.image.BufferedImage;
+import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileReader;
+import java.io.InputStreamReader;
 import java.net.InetAddress;
+import java.net.URL;
 import java.security.CodeSource;
 import java.text.SimpleDateFormat;
 import java.util.Date;
@@ -22,6 +25,7 @@ import java.util.logging.Logger;
 import javax.imageio.ImageIO;
 
 import org.apache.commons.codec.binary.Base64;
+
 import com.redhat.reportengine.server.dbmap.TestCase;
 import com.redhat.reportengine.server.dbmap.TestGroup;
 import com.redhat.reportengine.server.dbmap.TestLogs;
@@ -81,6 +85,38 @@ public class RemoteAPI {
 	public Date getServerTime() throws Exception{
 		return new SimpleDateFormat(TestResultsRestUrlMap.DATE_FORMAT).parse((String)restClient.get(TestResultsRestUrlMap.GET_SERVER_TIME, String.class));
 	}
+	/**
+	 * reads properties from given location
+	 * @param props original properties, new properties loaded by given location will override values
+	 * @param location either local file or url (starting with http) to read properties from
+	 * @return
+	 * @throws Exception when location is null or location could not be read
+	 */
+	private Properties loadProperties(Properties props, String location) throws Exception {
+	    if (location == null) {
+		throw new Exception("Cannot read property file : it's null");
+	    }
+	    if (props == null) {
+		props = new Properties();
+	    }
+	    if (location.startsWith("http")) {
+		URL url = new URL(location);
+		BufferedReader in = null;
+		try {
+		    in = new BufferedReader(new InputStreamReader(url.openStream()));
+		    props.load(in);
+		}
+		finally {
+		    if (in!=null) {
+			in.close();
+		    }
+		}
+	    }
+	    else {
+		props.load(new FileReader(location));
+	    }
+	    return props;
+	}
 
 	private void setAllVariables(){
 		try{
@@ -107,18 +143,24 @@ public class RemoteAPI {
 
 			_logger.log(Level.INFO, "Properties File: "+primaryPropertyFile);
 			if(primaryPropertyFile != null){
-				propertyFile.load(new FileReader(primaryPropertyFile));
+				propertyFile = loadProperties(propertyFile,primaryPropertyFile);
 			}else{
 				this.setClientConfigurationSuccess(false);
 				_logger.log(Level.WARNING, "Could not find report engine properties File any where, Please update property file by atleast one of the way, Disabled Report Engine logs!!");			
 			}
 
+			String origPropertyFileName = propertyFile.getProperty(originalFile); // get orig property file name form primary property file
+			if(System.getenv(originalFile) != null){ //get property file from system ENV variable
+			    origPropertyFileName = System.getenv(originalFile).trim(); 
+			}else if(System.getProperty(originalFile) != null){ //Get Property file by System Property variable
+			    origPropertyFileName = System.getProperty(originalFile).trim(); 
+			}
 
-			if((propertyFile.getProperty(originalFile) != null) && propertyFile.getProperty(originalFile).trim().length() > 0){
-				String newPropertyFile = propertyFile.getProperty(originalFile).trim();
-				_logger.log(Level.INFO, "Properties File(New): "+originalFile);
-				propertyFile.clear();
-				propertyFile.load(new FileReader(newPropertyFile));
+			if((origPropertyFileName!= null) && origPropertyFileName.length() > 0){
+				_logger.log(Level.INFO, "Properties File(New): "+origPropertyFileName);
+				Properties original = loadProperties(new Properties(), origPropertyFileName);
+				// reload main properties with original values ad defaults
+				propertyFile = loadProperties(original, primaryPropertyFile);
 			}
 
 			test.setServerRestUrl(propertyFile.getProperty(serverRESTUrl).trim());
